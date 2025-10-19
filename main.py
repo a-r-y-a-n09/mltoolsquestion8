@@ -86,12 +86,12 @@ def parse_query(q: str):
             
             return {
                 "name": func_def["name"],
-                "arguments": json.dumps(arguments, separators=(',', ':'))
+                "arguments": json.dumps(arguments, separators=(',', ' '))
             }
     
     return {
         "name": "unknown_function",
-        "arguments": json.dumps({"query": q}, separators=(',', ':'))
+        "arguments": json.dumps({"query": q}, separators=(',', ' '))
     }
 
 @app.get("/execute")
@@ -100,7 +100,7 @@ async def execute(q: str = Query(..., description="Query string containing the q
     Endpoint to parse query and return function name and arguments.
     
     Example: /execute?q=What is the status of ticket 83742?
-    Returns: {"name": "get_ticket_status", "arguments": "{\"ticket_id\":83742}"}
+    Returns: {"name": "get_ticket_status", "arguments": "{\"ticket_id\": 83742}"}
     """
     result = parse_query(q)
     return result
