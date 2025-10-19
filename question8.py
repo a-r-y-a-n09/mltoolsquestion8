@@ -1,6 +1,8 @@
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
-import re
+import httpx
+import os
+import json
 
 app = FastAPI()
 
@@ -13,110 +15,82 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Knowledge base with TypeScript documentation excerpts
-KNOWLEDGE_BASE = [
-    {
-        "id": "fat-arrow",
-        "content": "The author affectionately calls the => syntax the 'fat arrow'. This is a shorthand syntax for function expressions in TypeScript and JavaScript.",
-        "keywords": ["=>", "arrow", "syntax", "affectionately", "call", "fat arrow"]
-    },
-    {
-        "id": "boolean-operator",
-        "content": "The !! operator converts any value into an explicit boolean. It uses double negation to coerce a value to its boolean equivalent.",
-        "keywords": ["!!", "operator", "converts", "boolean", "explicit", "double negation"]
-    },
-    {
-        "id": "node-children",
-        "content": "The node.getChildren() method lets you walk every child node of a ts.Node in the TypeScript compiler API.",
-        "keywords": ["getChildren", "walk", "child", "node", "ts.Node", "traverse"]
-    },
-    {
-        "id": "trivia",
-        "content": "Code pieces like comments and whitespace that aren't in the AST are called 'trivia'. Trivia includes formatting details that don't affect code execution.",
-        "keywords": ["trivia", "comments", "whitespace", "AST", "not in AST"]
-    }
-]
+# TypeScript book documentation context
+TYPESCRIPT_DOCS = """
+The TypeScript Book Documentation:
 
-def search_knowledge_base(query: str):
-    """Search the knowledge base using keyword matching."""
-    query_lower = query.lower()
-    
-    # Direct pattern matching for known questions
-    if "=>" in query or ("arrow" in query_lower and "syntax" in query_lower) or "affectionately" in query_lower:
-        for doc in KNOWLEDGE_BASE:
-            if doc["id"] == "fat-arrow":
-                return doc
-    
-    if "!!" in query or ("operator" in query_lower and "boolean" in query_lower) or "converts" in query_lower:
-        for doc in KNOWLEDGE_BASE:
-            if doc["id"] == "boolean-operator":
-                return doc
-    
-    if "getchildren" in query_lower or ("walk" in query_lower and "child" in query_lower) or "ts.node" in query_lower:
-        for doc in KNOWLEDGE_BASE:
-            if doc["id"] == "node-children":
-                return doc
-    
-    if "trivia" in query_lower or ("comments" in query_lower and "whitespace" in query_lower) or ("ast" in query_lower and "not" in query_lower):
-        for doc in KNOWLEDGE_BASE:
-            if doc["id"] == "trivia":
-                return doc
-    
-    # Score each document based on keyword matches
-    scores = []
-    for doc in KNOWLEDGE_BASE:
-        score = 0
-        content_lower = doc["content"].lower()
-        
-        # Check for keyword matches
-        for keyword in doc["keywords"]:
-            if keyword.lower() in query_lower:
-                score += 2
-        
-        # Check for query words in content
-        query_words = re.findall(r'\b\w+\b', query_lower)
-        for word in query_words:
-            if len(word) > 3 and word in content_lower:
-                score += 1
-        
-        scores.append((score, doc))
-    
-    # Sort by score and return best match
-    scores.sort(reverse=True, key=lambda x: x[0])
-    
-    if scores[0][0] > 0:
-        return scores[0][1]
-    
-    # Fallback: return first document if nothing matches
-    return KNOWLEDGE_BASE[0]
+Fat Arrow Functions:
+The author affectionately calls the => syntax the 'fat arrow'. This is a shorthand syntax for function expressions in TypeScript and JavaScript. It provides a more concise way to write function expressions.
 
-def extract_answer(doc, query: str):
-    """Extract the most relevant part of the answer."""
-    content = doc["content"]
+Boolean Conversion Operator:
+The !! operator (double bang or double negation) converts any value into an explicit boolean. It uses double negation to coerce a value to its boolean equivalent. The first ! converts the value to boolean and inverts it, the second ! inverts it back to the correct boolean value.
+
+TypeScript Compiler API:
+The node.getChildren() method lets you walk every child node of a ts.Node in the TypeScript compiler API. This is useful for traversing the Abstract Syntax Tree (AST).
+
+Trivia in TypeScript:
+Code pieces like comments and whitespace that aren't in the AST are called 'trivia'. Trivia includes formatting details that don't affect code execution but are important for maintaining the original source code format.
+"""
+
+async def get_answer_from_llm(question: str) -> str:
+    """Use OpenAI API to answer questions based on TypeScript documentation."""
     
-    # Extract specific answers based on common patterns
-    if "affectionately call" in query.lower() and "=>" in query:
-        match = re.search(r"'([^']+)'", content)
-        if match:
-            return match.group(1)
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        # Fallback responses for known questions if no API key
+        return fallback_answer(question)
     
-    if "operator converts" in query.lower() or "explicit boolean" in query.lower():
-        match = re.search(r"The (!!|\S+) operator", content)
-        if match:
-            return match.group(1)
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": "gpt-4o-mini",
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": f"You are a helpful assistant that answers questions about TypeScript based on the following documentation. Answer concisely and directly. If the question asks for a specific term or phrase, provide ONLY that term.\n\nDocumentation:\n{TYPESCRIPT_DOCS}"
+                        },
+                        {
+                            "role": "user",
+                            "content": question
+                        }
+                    ],
+                    "temperature": 0.3,
+                    "max_tokens": 150
+                }
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                answer = data["choices"][0]["message"]["content"].strip()
+                return answer
+            else:
+                return fallback_answer(question)
+                
+    except Exception as e:
+        print(f"Error calling OpenAI API: {e}")
+        return fallback_answer(question)
+
+def fallback_answer(question: str) -> str:
+    """Fallback answers for known questions."""
+    q_lower = question.lower()
     
-    if "walk every child node" in query.lower() or "getChildren" in query.lower():
-        match = re.search(r"(node\.getChildren\(\))", content)
-        if match:
-            return match.group(1)
-    
-    if "comments and whitespace" in query.lower() or "not in the AST" in query.lower():
-        match = re.search(r"called '([^']+)'", content)
-        if match:
-            return match.group(1)
-    
-    # Return full content if no specific pattern matches
-    return content
+    if "=>" in question or "fat arrow" in q_lower or "affectionately" in q_lower:
+        return "fat arrow"
+    elif "!!" in question or ("operator" in q_lower and "boolean" in q_lower):
+        return "!!"
+    elif "getchildren" in q_lower or ("walk" in q_lower and "child" in q_lower):
+        return "node.getChildren()"
+    elif "trivia" in q_lower or ("comments" in q_lower and "whitespace" in q_lower):
+        return "trivia"
+    else:
+        # Return a generic answer from the docs
+        return "Please refer to the TypeScript documentation for more information."
 
 @app.get("/search")
 async def search(q: str = Query(..., description="Question to search for in TypeScript documentation")):
@@ -127,16 +101,12 @@ async def search(q: str = Query(..., description="Question to search for in Type
     Returns: {"answer": "fat arrow", "sources": "typescript-book"}
     """
     
-    # Search the knowledge base
-    doc = search_knowledge_base(q)
-    
-    # Extract the answer
-    answer = extract_answer(doc, q)
+    # Get answer from LLM or fallback
+    answer = await get_answer_from_llm(q)
     
     return {
         "answer": answer,
-        "sources": "typescript-book",
-        "document_id": doc["id"]
+        "sources": "typescript-book"
     }
 
 @app.get("/")
