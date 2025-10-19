@@ -86,12 +86,12 @@ def parse_query(q: str):
             
             return {
                 "name": func_def["name"],
-                "arguments": json.dumps(arguments, separators=(',', ' '))
+                "arguments": json.dumps(arguments, separators=(',', ': '))
             }
     
     return {
         "name": "unknown_function",
-        "arguments": json.dumps({"query": q}, separators=(',', ' '))
+        "arguments": json.dumps({"query": q}, separators=(',', ': '))
     }
 
 @app.get("/execute")
